@@ -1,0 +1,481 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+  camera-procedures - scripts suite dedicated to camera preparation.
+
+  Copyright (c) 2013-2015 FOXEL SA - http://foxel.ch
+  Please read <http://foxel.ch/license> for more information.
+
+
+  Author(s):
+
+       Kevin Velickovic <k.velickovic@foxel.ch>
+
+
+  This file is part of the FOXEL project <http://foxel.ch>.
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+  Additional Terms:
+
+       You are required to preserve legal notices and author attributions in
+       that material or in the Appropriate Legal Notices displayed by works
+       containing it.
+
+       You are required to attribute the work as explained in the "Usage and
+       Attribution" section of <http://foxel.ch/license>.
+"""
+
+import sys
+import glob
+import re
+import os
+import math
+from xml.dom import minidom
+from datetime import datetime
+
+# XML file class container
+class XMLFile:
+    def __init__(self, path, module):
+        self.path = path
+        self.filename = os.path.basename(path)
+        self.module = int(module)
+
+# Function to print debug messages
+def ShowMessage(Message, Type=0, Halt=0, SameLine=0):
+
+    # Colors by default
+    NO_COLORS = 0
+
+    # Flush stderr
+    sys.stderr.flush()
+
+    # Get current date
+    DateNow = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Get script name
+    scriptName = "%s :" % os.path.basename(__file__)
+
+    # Return type
+    RetChar = '\n'
+
+    if SameLine:
+        RetChar = '\r'
+
+    if Type == 0:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s INFO] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[32mINFO\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+    elif Type == 1:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s WARNING] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[33mWARNING\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+    elif Type == 2:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s ERROR] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[31mERROR\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+    elif Type == 3:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s DEBUG] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[34mDEBUG\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+
+    # Flush stderr
+    sys.stderr.flush()
+
+    # Halt program if requested
+    if Halt:
+        sys.exit()
+
+# Function to ask user input
+def ask(question, default):
+
+    # Read user input
+    res = raw_input('%s [%s] : ' % (question, default))
+    res = res or default
+
+    # Reutn result
+    return res
+
+
+# Usage display function
+def _usage():
+    print """
+    Usage: %s [OPTIONS]
+
+    [Required arguments]
+    --mount-point        Base mount directory
+    --mac-address        Camera MAC address
+
+    [Optional arguments]
+    --print             Output results to stdout
+    --help              Show this message
+
+    """ % sys.argv[0]
+
+# Function to display or write entry to file
+def processData(entry, inFile, stdOut=False):
+
+    # Check stdOut option
+    if stdOut:
+
+        # Write to stdout
+        sys.stdout.write( entry )
+
+    else:
+
+        # Write to file
+        inFile.write( entry )
+
+# Program entry point function
+# pylint: disable=W0142
+def main(argv):
+
+    # Parse arguments
+    Arguments = {}
+    Argv_Concat = ' '.join(argv)
+    Argv_Flags = Argv_Concat.split('--')
+
+    # Iterate over source args
+    for i in Argv_Flags:
+
+        # Check length
+        if len(i) > 0:
+
+            # Split by first space
+            splited = i.split(' ', 1)
+
+            # Check if argument contains value
+            if len(splited) > 1:
+                Arguments[splited[0]] = (None if not splited[1] else splited[1].strip())
+            else:
+                Arguments[splited[0]] =  None
+
+    # Parse arguments
+    __MountPoint__      = (None if not 'mount-point' in Arguments else Arguments['mount-point'].rstrip('/'))
+    __CameraMAC__       = (None if not 'mac-address' in Arguments else Arguments['mac-address'])
+    __Print__           = (1 if 'print' in Arguments else 0)
+    __Help__            = (1 if 'help' in Arguments else 0)
+
+    # Arguments check
+    if (not __MountPoint__ or not __CameraMAC__ ) or __Help__:
+        _usage()
+        sys.exit(0)
+
+    # Compute output path
+    OutputPath = "%s/camera/%s/fastcal" % (__MountPoint__, __CameraMAC__)
+
+    # Compute output file
+    OutputFile = "%s/calibration.key" % (OutputPath)
+
+    # Determine input path
+    Calibration_Foler   = "%s/camera/%s/calibration" % (__MountPoint__, __CameraMAC__)
+
+    # Check if output path exists, if not create it
+    if not os.path.isdir( OutputPath ):
+
+        # Create path
+        os.makedirs( OutputPath )
+
+    # Array to store results
+    XML_Files_Sensors = []
+    XML_Files_Maps = []
+
+    # Output file container
+    of = None
+
+    # Check if print option is specified
+    if not __Print__:
+
+        # Check if FastCal file exists
+        if os.path.isfile( OutputFile ):
+
+            # Ask user to override file
+            if not 'yes' in ask("FastCal file %s already present, replace it ?" % OutputFile, "no"):
+
+                # Exif app
+                sys.exit( 0 )
+
+        # Open output file
+        of = open(OutputFile, 'w')
+
+    # Debug output
+    ShowMessage("Indexing sensors XML's...", 0, 0, 0)
+
+    # Iterate over sensors XML's
+    for elem in sorted(glob.glob("%s/sensors/*.xml" % Calibration_Foler)):
+
+        # Extract sensor number from file name
+        entry = re.search( r'.*(\d\d)\.calib\-tiff\.xml', elem)
+
+        # Append XML file to array
+        XML_Files_Sensors.append( XMLFile(elem, int( entry.group( 1 ) )) )
+
+    # Debug output
+    ShowMessage("Indexing maps XML's...", 0, 0, 0)
+
+    # Iterate over maps XML's
+    for elem in sorted(glob.glob("%s/maps/*.xml" % Calibration_Foler)):
+
+        # Extract sensor number from file name
+        entry = re.search( r'.*(\d\d)\.eqr\-tiff\.xml', elem)
+
+        # Append XML file to array
+        XML_Files_Maps.append( XMLFile(elem, int( entry.group( 1 ) )) )
+
+
+    # Check if XML files are present
+    if len( XML_Files_Maps ) == 0 or len( XML_Files_Sensors ) == 0:
+
+        # Show error message and exit
+        ShowMessage("maps and sensors XML files not found", 2, 1)
+
+    # Results values container
+    Values = {
+        'camera': __CameraMAC__.replace('-', ':'),
+        'type': "eyesis4pi",
+        'model': "eyesis4pi_5hz",
+        'modules': 9,
+        'channels': 26,
+        'imu': "adis16375",
+        'gps': "ls20031",
+        'focalLength': [],
+        'azimuth': [],
+        'elevation': [],
+        'heading': [],
+        'pixelSize': [],
+        'px0': [],
+        'py0': [],
+        'roll': [],
+        'ImageFullWidth': [],
+        'ImageFullLength': [],
+        'XPosition': [],
+        'YPosition': [],
+        'pixelCorrectionWidth': [],
+        'pixelCorrectionHeight': [],
+        'radius': [],
+        'height': [],
+        'entrancePupilForward': []
+    }
+
+    # Debug output
+    ShowMessage("Parsing values from sensors XML's...", 0, 0, 0)
+
+    # Iterate over sensor XML files
+    for xml in XML_Files_Sensors:
+
+        # Read XML file
+        xmldoc = minidom.parse( xml.path )
+
+        # Iterate over XML entries
+        for i in xmldoc.getElementsByTagName('properties'):
+
+            # Read focalLength
+            focalLength_value = float( i.getElementsByTagName('focalLength')[ 0 ].childNodes[0].data )
+
+            # Read azimuth
+            azimuth_Value     = float( i.getElementsByTagName('azimuth')[ 0 ].childNodes[0].data )
+
+            # Read elevation
+            elevation_Value   = float( i.getElementsByTagName('elevation')[ 0 ].childNodes[0].data )
+
+            # Read heading
+            heading_Value     = float( i.getElementsByTagName('heading')[ 0 ].childNodes[0].data )
+
+            # Read pixelSize
+            pixelSize_Value   = float( i.getElementsByTagName('pixelSize')[ 0 ].childNodes[0].data )
+
+            # Read px0
+            px0_Value         = float( i.getElementsByTagName('px0')[ 0 ].childNodes[0].data )
+
+            # Read py0
+            py0_Value         = float( i.getElementsByTagName('py0')[ 0 ].childNodes[0].data )
+
+            # Read roll
+            roll_Value        = float( i.getElementsByTagName('roll')[ 0 ].childNodes[0].data )
+
+            # Read pixelCorrectionWidth
+            pixelCorrectionWidth_Value = int( i.getElementsByTagName('pixelCorrectionWidth')[ 0 ].childNodes[0].data )
+
+            # Read pixelCorrectionHeight
+            pixelCorrectionHeight_Value = int( i.getElementsByTagName('pixelCorrectionHeight')[ 0 ].childNodes[0].data )
+
+            # Read radius
+            radius_Value = float( i.getElementsByTagName('radius')[ 0 ].childNodes[0].data )
+
+            # Read height
+            height_Value = float( i.getElementsByTagName('height')[ 0 ].childNodes[0].data )
+
+            # Read height
+            entrancePupilForward_Value = float( i.getElementsByTagName('entrancePupilForward')[ 0 ].childNodes[0].data )
+
+            # Convert focalLength from mm to m
+            focalLength_value /= 1000.0
+
+            # Convert azimuth from degrees to radians
+            azimuth_Value = ( ( azimuth_Value * math.pi ) / 180.0 )
+
+            # Convert elevation from degrees to radians
+            elevation_Value = ( ( elevation_Value * math.pi ) / 180.0 )
+
+            # Convert heading from degrees to radians
+            heading_Value = ( ( heading_Value * math.pi ) / 180.0 )
+
+            # Convert pixelSize from um to m
+            pixelSize_Value /= 1000000.0
+
+            # Convert radius from mm to m
+            radius_Value /= 1000.0
+
+            # Convert height from mm to m
+            height_Value /= 1000.0
+
+            # Convert entrancePupilForward from mm to m
+            entrancePupilForward_Value /= 1000.0
+
+            # Convert roll from degrees to radians
+            roll_Value = ( ( roll_Value * math.pi ) / 180.0 )
+
+            # Insert values into array
+            Values[ 'focalLength' ].append( "focalLength_%02d=%.16e" % (xml.module, focalLength_value) )
+            Values[ 'azimuth' ].append( "azimuth_%02d=%.16e" % (xml.module, azimuth_Value) )
+            Values[ 'elevation' ].append( "elevation_%02d=%.16e" % (xml.module, elevation_Value) )
+            Values[ 'heading' ].append( "heading_%02d=%.16e" % (xml.module, heading_Value) )
+            Values[ 'pixelSize' ].append( "pixelSize_%02d=%.16e" % (xml.module, pixelSize_Value) )
+            Values[ 'px0' ].append( "px0_%02d=%.16e" % (xml.module, px0_Value) )
+            Values[ 'py0' ].append( "py0_%02d=%.16e" % (xml.module, py0_Value) )
+            Values[ 'roll' ].append( "roll_%02d=%.16e" % (xml.module, roll_Value) )
+            Values[ 'pixelCorrectionWidth' ].append( "pixelCorrectionWidth_%02d=%d" % (xml.module, pixelCorrectionWidth_Value) )
+            Values[ 'pixelCorrectionHeight' ].append( "pixelCorrectionHeight_%02d=%d" % (xml.module, pixelCorrectionHeight_Value) )
+            Values[ 'radius' ].append( "radius_%02d=%.16e" % (xml.module, radius_Value) )
+            Values[ 'height' ].append( "height_%02d=%.16e" % (xml.module, height_Value) )
+            Values[ 'entrancePupilForward' ].append( "entrancePupilForward_%02d=%.16e" % (xml.module, entrancePupilForward_Value) )
+
+    # Debug output
+    ShowMessage("Parsing values from maps XML's...", 0, 0, 0)
+
+    # Iterate over sensor XML files
+    for xml in XML_Files_Maps:
+
+        # Read XML file
+        xmldoc = minidom.parse( xml.path )
+
+        # Iterate over XML entries
+        for i in xmldoc.getElementsByTagName('properties'):
+
+            # Read ImageFullWidth
+            ImageFullWidth_value = int( i.getElementsByTagName('ImageFullWidth')[ 0 ].childNodes[0].data )
+
+            # Read ImageFullLength
+            ImageFullLength_value = int( i.getElementsByTagName('ImageFullLength')[ 0 ].childNodes[0].data )
+
+            # Read XPosition
+            XPosition_value = int( i.getElementsByTagName('XPosition')[ 0 ].childNodes[0].data )
+
+            # Read YPosition
+            YPosition_value = int( i.getElementsByTagName('YPosition')[ 0 ].childNodes[0].data )
+
+            # Insert values into array
+            Values[ 'ImageFullWidth' ].append( "ImageFullWidth_%02d=%d" % (xml.module, ImageFullWidth_value) )
+            Values[ 'ImageFullLength' ].append( "ImageFullLength_%02d=%d" % (xml.module, ImageFullLength_value) )
+            Values[ 'XPosition' ].append( "XPosition_%02d=%d" % (xml.module, XPosition_value) )
+            Values[ 'YPosition' ].append( "YPosition_%02d=%d" % (xml.module, YPosition_value) )
+
+    # Debug output
+    ShowMessage("Asking user for needed informations...", 0, 0, 0)
+
+    # Ask user
+    Values[ 'camera' ] = ask('camera', Values[ 'camera' ])
+    Values[ 'type' ] = ask('type', Values[ 'type' ])
+    Values[ 'model' ] = ask('model', Values[ 'model' ])
+    Values[ 'modules' ] = ask('modules', Values[ 'modules' ])
+    Values[ 'channels' ] = ask('channels', Values[ 'channels' ])
+    Values[ 'imu' ] = ask('imu', Values[ 'imu' ])
+    Values[ 'gps' ] = ask('gps', Values[ 'gps' ])
+
+    # Debug output
+    ShowMessage("Writing output...", 0, 0, 0)
+
+    # Writing values to file
+    processData("camera=%s\n" % Values[ 'camera' ], of, __Print__)
+    processData("type=%s\n" % Values[ 'type' ], of, __Print__)
+    processData("model=%s\n" % Values[ 'model' ], of, __Print__)
+    processData("modules=%s\n" % Values[ 'modules' ], of, __Print__)
+    processData("channels=%s\n" % Values[ 'channels' ], of, __Print__)
+    processData("imu=%s\n" % Values[ 'imu' ], of, __Print__)
+    processData("gps=%s\n" % Values[ 'gps' ], of, __Print__)
+
+    # Write values
+    for i in Values[ 'focalLength' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'azimuth' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'elevation' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'heading' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'pixelSize' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'px0' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'py0' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'roll' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'ImageFullWidth' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'ImageFullLength' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'XPosition' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'YPosition' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'pixelCorrectionWidth' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'pixelCorrectionHeight' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'radius' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'height' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'entrancePupilForward' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    # Debug output
+    ShowMessage("Done", 0, 0, 0)
+
+# Program entry point
+if __name__ == "__main__":
+    main(sys.argv[1:])
