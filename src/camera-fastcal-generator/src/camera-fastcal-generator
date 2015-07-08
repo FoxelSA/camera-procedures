@@ -39,6 +39,7 @@
        Attribution" section of <http://foxel.ch/license>.
 """
 
+import exifread
 import glob
 import math
 import os
@@ -286,7 +287,9 @@ def main(argv):
         'pixelCorrectionHeight': [],
         'radius': [],
         'height': [],
-        'entrancePupilForward': []
+        'entrancePupilForward': [],
+        'equirectangularWidth': [],
+        'equirectangularHeight': []
     }
 
     # Debug output
@@ -391,6 +394,12 @@ def main(argv):
         # Extract ImageJ XML file from image
         xmldoc =  minidom.parseString( getXMLFromImage( tiff.path ) )
 
+        # Extract EXIF tags from image
+        EXIF_Tags = None
+
+        with open( tiff.path, 'r' ) as f:
+            EXIF_Tags = exifread.process_file( f )
+
         # Iterate over XML entries
         for i in xmldoc.getElementsByTagName('properties'):
 
@@ -406,11 +415,19 @@ def main(argv):
             # Read YPosition
             YPosition_value = int( i.getElementsByTagName('YPosition')[ 0 ].childNodes[0].data )
 
+            # Read equirectangular width
+            eqr_width = int( "%s" % EXIF_Tags[ 'Image ImageWidth' ] )
+
+            # Read equirectangular height
+            eqr_height = int( "%s" % EXIF_Tags[ 'Image ImageLength' ] )
+
             # Insert values into array
             Values[ 'ImageFullWidth' ].append( "ImageFullWidth_%02d=%d" % (tiff.module, ImageFullWidth_value) )
             Values[ 'ImageFullLength' ].append( "ImageFullLength_%02d=%d" % (tiff.module, ImageFullLength_value) )
             Values[ 'XPosition' ].append( "XPosition_%02d=%d" % (tiff.module, XPosition_value) )
             Values[ 'YPosition' ].append( "YPosition_%02d=%d" % (tiff.module, YPosition_value) )
+            Values[ 'equirectangularWidth' ].append( "equirectangularWidth_%02d=%d" % (tiff.module, eqr_width) )
+            Values[ 'equirectangularHeight' ].append( "equirectangularHeight_%02d=%d" % (tiff.module, eqr_height) )
 
     # Debug output
     ShowMessage("Asking user for needed informations...", 0, 0, 0)
@@ -486,6 +503,12 @@ def main(argv):
         processData("%s\n" % i, of, __Print__)
 
     for i in Values[ 'entrancePupilForward' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'equirectangularWidth' ]:
+        processData("%s\n" % i, of, __Print__)
+
+    for i in Values[ 'equirectangularHeight' ]:
         processData("%s\n" % i, of, __Print__)
 
     # Debug output
