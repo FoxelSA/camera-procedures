@@ -39,16 +39,17 @@
        Attribution" section of <http://foxel.ch/license>.
 """
 
-import sys
 import glob
-import re
-import os
 import math
-from xml.dom import minidom
+import os
+import re
+import sys
+import tifffile
 from datetime import datetime
+from xml.dom import minidom
 
-# XML file class container
-class XMLFile:
+# Tiff file class container
+class TiffFile:
     def __init__(self, path, module):
         self.path = path
         self.filename = os.path.basename(path)
@@ -129,6 +130,20 @@ def _usage():
 
     """ % sys.argv[0]
 
+# Function to extract ImageJ XML from tiff image
+def getXMLFromImage( path ):
+
+    # Open tiff file
+    with tifffile.TiffFile( path ) as tif:
+
+        # Extract XML and clean contents
+        METADATA = tif[ 0 ].tags[ 'imagej_metadata' ].as_str() \
+        .replace("\0", "")
+        METADATA = re.sub(r'(?x).*<\?xml', '<?xml', METADATA)
+
+        # Return result
+        return METADATA
+
 # Function to display or write entry to file
 def processData(entry, inFile, stdOut=False):
 
@@ -194,8 +209,8 @@ def main(argv):
         os.makedirs( OutputPath )
 
     # Array to store results
-    XML_Files_Sensors = []
-    XML_Files_Maps = []
+    Tiff_Files_Sensors = []
+    Tiff_Files_Maps = []
 
     # Output file container
     of = None
@@ -216,35 +231,35 @@ def main(argv):
         of = open(OutputFile, 'w')
 
     # Debug output
-    ShowMessage("Indexing sensors XML's...", 0, 0, 0)
+    ShowMessage("Indexing sensors Tiff's...", 0, 0, 0)
 
-    # Iterate over sensors XML's
-    for elem in sorted(glob.glob("%s/sensors/*.xml" % Calibration_Foler)):
+    # Iterate over sensors Tiff's
+    for elem in sorted(glob.glob("%s/sensors/*.calib-tiff" % Calibration_Foler)):
 
         # Extract sensor number from file name
-        entry = re.search( r'.*(\d\d)\.calib\-tiff\.xml', elem)
+        entry = re.search( r'.*(\d\d)\.calib\-tiff', elem)
 
-        # Append XML file to array
-        XML_Files_Sensors.append( XMLFile(elem, int( entry.group( 1 ) )) )
+        # Append tiff file to array
+        Tiff_Files_Sensors.append( TiffFile(elem, int( entry.group( 1 ) )) )
 
     # Debug output
-    ShowMessage("Indexing maps XML's...", 0, 0, 0)
+    ShowMessage("Indexing maps Tiff's...", 0, 0, 0)
 
-    # Iterate over maps XML's
-    for elem in sorted(glob.glob("%s/maps/*.xml" % Calibration_Foler)):
+    # Iterate over maps Tiff's
+    for elem in sorted(glob.glob("%s/maps/*.eqr-tiff" % Calibration_Foler)):
 
         # Extract sensor number from file name
-        entry = re.search( r'.*(\d\d)\.eqr\-tiff\.xml', elem)
+        entry = re.search( r'.*(\d\d)\.eqr\-tiff', elem)
 
-        # Append XML file to array
-        XML_Files_Maps.append( XMLFile(elem, int( entry.group( 1 ) )) )
+        # Append tiff file to array
+        Tiff_Files_Maps.append( TiffFile(elem, int( entry.group( 1 ) )) )
 
 
-    # Check if XML files are present
-    if len( XML_Files_Maps ) == 0 or len( XML_Files_Sensors ) == 0:
+    # Check if tiff files are present
+    if len( Tiff_Files_Maps ) == 0 or len( Tiff_Files_Sensors ) == 0:
 
         # Show error message and exit
-        ShowMessage("maps and sensors XML files not found", 2, 1)
+        ShowMessage("maps and sensors tiff files not found", 2, 1)
 
     # Results values container
     Values = {
@@ -275,13 +290,13 @@ def main(argv):
     }
 
     # Debug output
-    ShowMessage("Parsing values from sensors XML's...", 0, 0, 0)
+    ShowMessage("Parsing values from sensors Tiff's...", 0, 0, 0)
 
-    # Iterate over sensor XML files
-    for xml in XML_Files_Sensors:
+    # Iterate over sensor tiff files
+    for tiff in Tiff_Files_Sensors:
 
-        # Read XML file
-        xmldoc = minidom.parse( xml.path )
+        # Extract ImageJ XML file from image
+        xmldoc = minidom.parseString( getXMLFromImage( tiff.path ) )
 
         # Iterate over XML entries
         for i in xmldoc.getElementsByTagName('properties'):
@@ -353,28 +368,28 @@ def main(argv):
             roll_Value = ( ( roll_Value * math.pi ) / 180.0 )
 
             # Insert values into array
-            Values[ 'focalLength' ].append( "focalLength_%02d=%.16e" % (xml.module, focalLength_value) )
-            Values[ 'azimuth' ].append( "azimuth_%02d=%.16e" % (xml.module, azimuth_Value) )
-            Values[ 'elevation' ].append( "elevation_%02d=%.16e" % (xml.module, elevation_Value) )
-            Values[ 'heading' ].append( "heading_%02d=%.16e" % (xml.module, heading_Value) )
-            Values[ 'pixelSize' ].append( "pixelSize_%02d=%.16e" % (xml.module, pixelSize_Value) )
-            Values[ 'px0' ].append( "px0_%02d=%.16e" % (xml.module, px0_Value) )
-            Values[ 'py0' ].append( "py0_%02d=%.16e" % (xml.module, py0_Value) )
-            Values[ 'roll' ].append( "roll_%02d=%.16e" % (xml.module, roll_Value) )
-            Values[ 'pixelCorrectionWidth' ].append( "pixelCorrectionWidth_%02d=%d" % (xml.module, pixelCorrectionWidth_Value) )
-            Values[ 'pixelCorrectionHeight' ].append( "pixelCorrectionHeight_%02d=%d" % (xml.module, pixelCorrectionHeight_Value) )
-            Values[ 'radius' ].append( "radius_%02d=%.16e" % (xml.module, radius_Value) )
-            Values[ 'height' ].append( "height_%02d=%.16e" % (xml.module, height_Value) )
-            Values[ 'entrancePupilForward' ].append( "entrancePupilForward_%02d=%.16e" % (xml.module, entrancePupilForward_Value) )
+            Values[ 'focalLength' ].append( "focalLength_%02d=%.16e" % (tiff.module, focalLength_value) )
+            Values[ 'azimuth' ].append( "azimuth_%02d=%.16e" % (tiff.module, azimuth_Value) )
+            Values[ 'elevation' ].append( "elevation_%02d=%.16e" % (tiff.module, elevation_Value) )
+            Values[ 'heading' ].append( "heading_%02d=%.16e" % (tiff.module, heading_Value) )
+            Values[ 'pixelSize' ].append( "pixelSize_%02d=%.16e" % (tiff.module, pixelSize_Value) )
+            Values[ 'px0' ].append( "px0_%02d=%.16e" % (tiff.module, px0_Value) )
+            Values[ 'py0' ].append( "py0_%02d=%.16e" % (tiff.module, py0_Value) )
+            Values[ 'roll' ].append( "roll_%02d=%.16e" % (tiff.module, roll_Value) )
+            Values[ 'pixelCorrectionWidth' ].append( "pixelCorrectionWidth_%02d=%d" % (tiff.module, pixelCorrectionWidth_Value) )
+            Values[ 'pixelCorrectionHeight' ].append( "pixelCorrectionHeight_%02d=%d" % (tiff.module, pixelCorrectionHeight_Value) )
+            Values[ 'radius' ].append( "radius_%02d=%.16e" % (tiff.module, radius_Value) )
+            Values[ 'height' ].append( "height_%02d=%.16e" % (tiff.module, height_Value) )
+            Values[ 'entrancePupilForward' ].append( "entrancePupilForward_%02d=%.16e" % (tiff.module, entrancePupilForward_Value) )
 
     # Debug output
-    ShowMessage("Parsing values from maps XML's...", 0, 0, 0)
+    ShowMessage("Parsing values from maps Tiff's...", 0, 0, 0)
 
-    # Iterate over sensor XML files
-    for xml in XML_Files_Maps:
+    # Iterate over sensor tiff files
+    for tiff in Tiff_Files_Maps:
 
-        # Read XML file
-        xmldoc = minidom.parse( xml.path )
+        # Extract ImageJ XML file from image
+        xmldoc =  minidom.parseString( getXMLFromImage( tiff.path ) )
 
         # Iterate over XML entries
         for i in xmldoc.getElementsByTagName('properties'):
@@ -392,10 +407,10 @@ def main(argv):
             YPosition_value = int( i.getElementsByTagName('YPosition')[ 0 ].childNodes[0].data )
 
             # Insert values into array
-            Values[ 'ImageFullWidth' ].append( "ImageFullWidth_%02d=%d" % (xml.module, ImageFullWidth_value) )
-            Values[ 'ImageFullLength' ].append( "ImageFullLength_%02d=%d" % (xml.module, ImageFullLength_value) )
-            Values[ 'XPosition' ].append( "XPosition_%02d=%d" % (xml.module, XPosition_value) )
-            Values[ 'YPosition' ].append( "YPosition_%02d=%d" % (xml.module, YPosition_value) )
+            Values[ 'ImageFullWidth' ].append( "ImageFullWidth_%02d=%d" % (tiff.module, ImageFullWidth_value) )
+            Values[ 'ImageFullLength' ].append( "ImageFullLength_%02d=%d" % (tiff.module, ImageFullLength_value) )
+            Values[ 'XPosition' ].append( "XPosition_%02d=%d" % (tiff.module, XPosition_value) )
+            Values[ 'YPosition' ].append( "YPosition_%02d=%d" % (tiff.module, YPosition_value) )
 
     # Debug output
     ShowMessage("Asking user for needed informations...", 0, 0, 0)
