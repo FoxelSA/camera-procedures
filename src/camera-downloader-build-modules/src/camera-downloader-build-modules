@@ -458,12 +458,12 @@ def _usage():
     Usage: %s [OPTIONS]
 
     [Required arguments]
-    --mount-point        Base mount directory
+    --mount-point         Base mount directory
 
     [Optional arguments]
-    --help              Show this message
+    --help                Show this message
 
-    """ % sys.argv[0]
+    """ % os.path.basename( sys.argv[0] )
 
 # Program entry point function
 def main(argv):
