@@ -4,7 +4,7 @@
 #
 
     all:directories
-	# cp src/camera-fastcal-generator bin/camera-fastcal-generator
+	cp src/camera-downloader-build-modules bin/camera-downloader-build-modules
 
 #
 #   make - directories

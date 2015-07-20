@@ -1,0 +1,643 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+  rawdata-procedures - Camera raw data procedures
+
+  Copyright (c) 2013-2015 FOXEL SA - http://foxel.ch
+  Please read <http://foxel.ch/license> for more information.
+
+
+  Author(s):
+
+       Kevin Velickovic <k.velickovic@foxel.ch>
+
+
+  This file is part of the FOXEL project <http://foxel.ch>.
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+  Additional Terms:
+
+       You are required to preserve legal notices and author attributions in
+       that material or in the Appropriate Legal Notices displayed by works
+       containing it.
+
+       You are required to attribute the work as explained in the "Usage and
+       Attribution" section of <http://foxel.ch/license>.
+"""
+
+import glob
+import json
+import os
+import re
+import select
+import subprocess
+import sys
+import time
+import urllib2
+from datetime import datetime
+
+# Function to print debug messages
+def ShowMessage(Message, Type=0, Halt=0):
+
+    NO_COLORS = 0
+
+    # Flush stdout
+    sys.stdout.flush()
+
+    # Get current date
+    DateNow = datetime.now().strftime("%H:%M:%S")
+
+    # Get script name
+    scriptName = "%s :" % os.path.basename(__file__)
+
+    # Display proper message
+    if Type == 0:
+        if NO_COLORS:
+            sys.stderr.write("[%s] [INFO] %s %s\n" % (DateNow, scriptName, Message))
+        else:
+            sys.stderr.write("[%s] \033[32m[INFO]\033[39m %s %s\n" % (DateNow, scriptName, Message))
+    elif Type == 1:
+        if NO_COLORS:
+            sys.stderr.write("[%s] [WARNING] %s %s\n" % (DateNow, scriptName, Message))
+        else:
+            sys.stderr.write("[%s] \033[33m[WARNING]\033[39m %s %s\n" % (DateNow, scriptName, Message))
+    elif Type == 2:
+        if NO_COLORS:
+            sys.stderr.write("[%s] [ERROR] %s %s\n" % (DateNow, scriptName, Message))
+        else:
+            sys.stderr.write("[%s] \033[31m[ERROR]\033[39m %s %s\n" % (DateNow, scriptName, Message))
+    elif Type == 3:
+        if NO_COLORS:
+            sys.stderr.write("[%s] [DEBUG] %s %s\n" % (DateNow, scriptName, Message))
+        else:
+            sys.stderr.write("[%s] \033[34m[DEBUG]\033[39m %s %s\n" % (DateNow, scriptName, Message))
+
+    # Flush stdout
+    sys.stdout.flush()
+
+    # Halt program if requested
+    if Halt:
+        sys.exit()
+
+# Function to retrieve disk serial from a camera module
+def get_disk_serial( module ):
+
+    # Send querry
+    data = urllib2.urlopen( "http://192.168.0.22" + str( module ) + "/phpshell.php?command=hdparm%20-i%20/dev/hda|grep%20'SerialNo'" )
+
+    # Check if mac address is not empty
+    if not data:
+
+        # Exit function
+        return
+
+    # Iterate over output lines
+    for line in data:
+
+        # Extract serial number
+        exp_data = re.search( r'.*SerialNo\=(.*)\<.*', line )
+
+        # Check if serial number is valid
+        if exp_data:
+
+            # Return serial number
+            return exp_data.group( 1 )
+
+# Function to get mac address from camera
+def get_camera_mac():
+
+    # Catch errors
+    try:
+
+        # Send querry
+        data = urllib2.urlopen( "http://192.168.0.221/phpshell.php?command=echo%20MacAddr%20$(cat%20/sys/class/net/eth0/address)" )
+
+        # Check if mac address is not empty
+        if not data:
+
+            # Exit function
+            return
+
+        # Iterate over output lines
+        for line in data:
+
+            # Extract mac address
+            exp_data = re.search( r'.*MacAddr\s(.*)\<.*', line )
+
+            # Check if mac address is valid
+            if exp_data:
+
+                # Return mac address
+                return exp_data.group( 1 ).upper().replace(':', '-')
+
+    except:
+
+        # Exit function
+        return
+
+# Function to get camera uptime in minutes
+def get_camera_uptime():
+
+    # Loop variables
+    retries_max_url   = 3
+    retries_count_url = 0
+
+    while True:
+
+        # Check if retries exceed limit
+        if retries_count_url >= retries_max_url:
+
+            # Exit loop
+            return
+
+        # Catch errors
+        try:
+
+            # Send querry
+            data = urllib2.urlopen( "http://192.168.0.221/phpshell.php?command=cat%20/proc/uptime%20|%20cut%20-d'%20'%20-f1", timeout=10)
+
+            # Check if mac address is not empty
+            if not data:
+
+                # Exit function
+                return
+
+            # Iterate over output lines
+            for line in data:
+
+                # Extract uptime
+                exp_data = re.search( r'(\d+\.\d+)\<\/textarea\>.*', line )
+
+                # Check if mac address is valid
+                if exp_data:
+
+                    # Return mac address
+                    return float( exp_data.group( 1 ) )
+
+            # Exit loop
+            break
+
+        except:
+
+            # Debug output
+            ShowMessage("Failed to send querry, camera offline ? or this machine is not on the 192.168.0/24 subnet ?, retrying... (%d of %d)" % (retries_count_url + 1, retries_max_url), 1)
+
+            # Increment retries
+            retries_count_url += 1
+
+            # Sleep 5s
+            time.sleep( 5 )
+
+# Function to retrieve mount point of a disk on the local system by its serial
+def find_disk_by_serial( modules_file ):
+
+    # List connected SCSI disks
+    connected_disks = glob.glob("/dev/sd*")
+
+    # Iterate over connected disks
+    for local_disk in connected_disks:
+
+        # Read serial of SCSI device
+        local_disk_serial = os.popen("udevadm info --query=all --name=%s | grep ID_SERIAL_SHORT | cut -d'=' -f2" % local_disk).read()
+
+        # Iterate over possible modules ( 1 - 9 )
+        for module in range( 1, 10 ):
+
+            # Extract corresponding module serial from JSON modules file data
+            module_serial = str( modules_file[ 'modules' ][ module ][ 'serial' ] )
+
+            # Comparte serial
+            if module_serial in local_disk_serial:
+
+                # Return data
+                return module_serial
+
+# Function to connect a specified ssd from a specified mux
+def connect_disk( mux, disk, modules_file ):
+
+    # Debug output
+    ShowMessage("Connecting %s on multiplexer %d..." % (disk, mux))
+
+    # Establish kernel log watcher
+    f = subprocess.Popen(['tail','-F', "/var/log/kern.log", '-n', '0'],\
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+    p = select.poll()
+    p.register(f.stdout)
+
+    # Debug output
+    ShowMessage("Sending querry to the camera...")
+
+    # Loop variables
+    retries_max_url   = 3
+    retries_count_url = 0
+
+    # Endless loop
+    while True:
+
+        # Check if retries exceed limit
+        if retries_count_url >= retries_max_url:
+
+            # Exit loop
+            return
+
+        # Catch errors
+        try:
+
+            # Ask the Eyesis to connect the disk
+            urllib2.urlopen( "http://192.168.0.%d/103697.php?c:host4=%s" % ( mux, disk ), timeout = 10)
+
+            # Exit loop
+            break
+
+        except:
+
+            # Debug output
+            ShowMessage("Failed to send querry, camera offline ? or this machine is not on the 192.168.0/24 subnet ?, retrying... (%d of %d)" % (retries_count_url + 1, retries_max_url), 1)
+
+            # Increment retries
+            retries_count_url += 1
+
+            # Sleep 5s
+            time.sleep( 5 )
+
+    # Loop variables
+    timeout_counter = 0
+    timeout_limit   = 20
+    retries_max     = 3
+    retries_count   = 0
+
+    # Debug output
+    ShowMessage("Waiting for system...")
+
+    # Loop
+    while True:
+
+        # Check if timeout excedeed
+        if timeout_counter >= timeout_limit:
+
+            # Check if retries exceed limit
+            if retries_count >= retries_max:
+
+                # Exit loop
+                break
+
+            else:
+
+                # Debug output
+                ShowMessage("Timeout connecting %s on multiplexer %d..., verify SATA cables connection, retrying... (%d of %d)" % (disk, mux, retries_count + 1, retries_max), 1)
+
+                # Increment retries counter
+                retries_count  += 1
+
+                # Reset timeout counter
+                timeout_counter = 0
+
+        # Check if kernel output are available
+        if p.poll( 1 ):
+
+            # Extract line
+            line = f.stdout.readline()
+
+            # Check if event is an SCSI attach event
+            if "Attached scsi" in line:
+
+                # Debug output
+                ShowMessage("Disk attached, waiting 5s for initialisation...")
+
+                # Wait 5 seconds for device initialisation
+                time.sleep( 5 )
+
+                # Find mount point and module of disk
+                disk_serial = find_disk_by_serial( modules_file )
+
+                # Check if disk is correctily mounted
+                if disk_serial:
+
+                    # Return data
+                    return  disk_serial
+
+        # Sleep 100ms
+        time.sleep( 0.1 )
+
+        # Increment timeout counter
+        timeout_counter += 0.1
+
+# Function to disconnect a specified mux
+def disconnect_disk( mux_base_addr, skip_check=0 ):
+
+    # Debug output
+    ShowMessage("Disconnecting multiplexer %d..." % (mux_base_addr))
+
+    # Local variables
+    f = None
+    p = None
+
+    # Check if skip checks requested
+    if not skip_check:
+
+        # Establish kernel log watcher
+        f = subprocess.Popen(['tail','-F', "/var/log/kern.log", '-n', '0'],\
+                stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        p = select.poll()
+        p.register(f.stdout)
+
+    # Debug output
+    ShowMessage("Sending querry to the camera...")
+
+    # Loop variables
+    retries_max_url   = 3
+    retries_count_url = 0
+
+    # Endless loop
+    while True:
+
+        # Check if retries exceed limit
+        if retries_count_url >= retries_max_url:
+
+            # Exit loop
+            return
+
+        # Catch errors
+        try:
+
+            # Ask the Eyesis to reset the mux
+            urllib2.urlopen( "http://192.168.0.%d/eyesis_ide.php" % ( mux_base_addr ), timeout=10 )
+
+            # Exit loop
+            break
+
+        except:
+
+            # Debug output
+            ShowMessage("Failed to send querry, camera offline ? or this machine is not on the 192.168.0/24 subnet ?, retrying... (%d of %d)" % (retries_count_url + 1, retries_max_url), 1)
+
+            # Increment retries
+            retries_count_url += 1
+
+            # Sleep 5s
+            time.sleep( 5 )
+
+    # Check if skip checks requested
+    if skip_check:
+
+        # Exit function
+        return
+
+    # Loop variables
+    timeout_counter = 0
+    timeout_limit   = 30
+
+    # Debug output
+    ShowMessage("Waiting for system...")
+
+    # Loop
+    while True:
+
+        # Check if timeout excedeed
+        if timeout_counter >= timeout_limit:
+
+            # Debug output
+            ShowMessage("Timeout disconnecting multiplexer %d..., verify SATA cables connection" % (mux_base_addr), 2)
+
+            # Exit loop
+            break
+
+        # Check if kernel output are available
+        if p.poll(1):
+
+            # Extract line
+            line = f.stdout.readline()
+
+            # Check if event is an SCSI attach event
+            if "Stopping disk" in line:
+
+                # Exit loop
+                break
+
+        # Sleep 100ms
+        time.sleep( 0.1 )
+
+        # Increment timeout counter
+        timeout_counter += 0.1
+
+# Function to update JSON fields based on disk serial
+def updateJSON( json_array, disk_serial, disk, mux ):
+
+    # Iterate over possible modules
+    for i in range(1, 10):
+
+        # Get disk serial
+        serial = str( json_array[ 'modules' ][ i ][ 'serial' ] )
+
+        # Check if current index matches serial
+        if disk_serial in serial:
+
+            # Update fields
+            json_array[ 'modules' ][ i ][ 'mux' ]  = mux
+            json_array[ 'modules' ][ i ][ 'disk' ] = disk
+
+    return
+
+# Usage display function
+def _usage():
+    print """
+    Usage: %s [OPTIONS]
+
+    [Required arguments]
+    --mount-point        Base mount directory
+
+    [Optional arguments]
+    --help              Show this message
+
+    """ % sys.argv[0]
+
+# Program entry point function
+def main(argv):
+
+    # Parse arguments
+    Arguments = {}
+    Argv_Concat = ' '.join(argv)
+    Argv_Flags = Argv_Concat.split('--')
+
+    # Iterate over source args
+    for i in Argv_Flags:
+
+        # Check length
+        if len(i) > 0:
+
+            # Split by first space
+            splited = i.split(' ', 1)
+
+            # Check if argument contains value
+            if len(splited) > 1:
+                Arguments[splited[0]] = (None if not splited[1] else splited[1].strip())
+            else:
+                Arguments[splited[0]] =  None
+
+    # Arguments variables
+    __MountPoint__      = (None if not 'mount-point' in Arguments else Arguments['mount-point'].rstrip('/'))
+    __Help__            = (1 if 'help' in Arguments else 0)
+
+    # Arguments check
+    if (not __MountPoint__) or __Help__:
+        _usage()
+        sys.exit(0)
+
+    # Debug output
+    ShowMessage("Checking camera uptime...")
+
+    # Get camera uptime
+    camera_uptime = get_camera_uptime()
+
+    # Check if command succeeded
+    if camera_uptime:
+
+        # Debug output
+        ShowMessage( "Camera is up since %.2f minute(s)" % ( camera_uptime / 60.0 )  )
+
+    else:
+
+        # Exit function
+        return False
+
+    # Check if uptime is less than 3min
+    if camera_uptime < ( 3.0 * 60.0 ):
+
+        # Determine time to sleep
+        sleep_time = ( ( ( 3.0 * 60.0 ) - camera_uptime ) )
+
+        # Debug output
+        ShowMessage( "Waiting %.2f minute(s) for camera initialisation..." % ( sleep_time / 60.0 )  )
+
+        # Wait for initialisation
+        time.sleep( sleep_time )
+
+    # Get camera MAC address
+    __MAC_Address__ = get_camera_mac()
+
+    # Check if output is valid
+    if not __MAC_Address__:
+
+        # Debug output
+        ShowMessage("Failed to get mac address from camera, disk failure ?, camera offline ? or this machine is not on the 192.168.0/24 subnet ?", 2, 1)
+
+    # Compute paths
+    __DestDir__ = "%s/camera/%s/rawdata-downloader" % ( __MountPoint__,  __MAC_Address__)
+    __DestJSONFile__ = "%s/modules.json" % ( __DestDir__ )
+
+    # Check if destination directory exists
+    if not os.path.isdir( __DestDir__ ):
+
+        # Create destination directory
+        os.makedirs( __DestDir__ )
+
+    # JSON data container
+    json_data = {
+        'modules': {},
+        'multiplexers': {
+            224: {
+                'disks': [
+                    'ssd1',
+                    'ssd2',
+                    'ssd3',
+                    'ssd4'
+                ]
+            },
+            228: {
+                'disks': [
+                    'ssd1',
+                    'ssd2',
+                    'ssd3',
+                    'ssd4',
+                    'ssd5'
+                ]
+            }
+        }
+    }
+
+    # Debug output
+    ShowMessage("Resetting multiplexers...")
+
+    # Reset multiplexers
+    # Iterate over possible muxes
+    for mux in json_data[ 'multiplexers' ]:
+
+        # Debug output
+        ShowMessage("Resetting mux %d..." % mux)
+
+        # Disconnect disk
+        disconnect_disk( mux, 1 )
+
+    # Debug output
+    ShowMessage("Asking camera for disks serial...")
+
+    # Iterate over possible modules
+    for i in range(1, 10):
+
+        # Get disk serial
+        disk_serial = get_disk_serial( i )
+
+        # Check if output is valid
+        if not disk_serial:
+
+            # Debug output
+            ShowMessage("Failed to get disk serial from camera, disk failure ?, camera offline ? or this machine is not on the 192.168.0/24 subnet ?", 2, 1)
+
+        else:
+
+            # Debug output
+            ShowMessage("Got %s from module %d" % (disk_serial, i))
+
+            # Append serial
+            json_data[ 'modules' ][ i ] = { 'serial': disk_serial }
+
+
+    # Iterate over possible muxes
+    for mux in json_data[ 'multiplexers' ].items():
+
+        # Extract mux informations
+        mux_id    = mux[ 0 ]
+        mux_disks = mux[ 1 ][ 'disks' ]
+
+        # Iterate over possible mux disks
+        for disk in mux_disks:
+
+            # Connect disk
+            serial = connect_disk( mux_id, disk, json_data )
+
+            # Check if disk successfuly connected
+            if serial:
+
+                # Update JSON array
+                updateJSON( json_data, serial, disk, mux_id )
+
+                # Disconnect disk
+                disconnect_disk( mux_id )
+
+    # Debug output
+    ShowMessage("Writing JSON file...")
+
+    # Open and write output JSON file
+    with open( __DestJSONFile__ , 'w') as outfile:
+        json.dump(json_data, outfile, sort_keys = True, indent = 4)
+
+    # Debug output
+    ShowMessage("Done")
+
+# Program entry point
+if __name__ == "__main__":
+    main(sys.argv[1:])
