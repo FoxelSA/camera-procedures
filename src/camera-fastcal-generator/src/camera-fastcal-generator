@@ -265,6 +265,7 @@ def main(argv):
     # Results values container
     Values = {
         'camera': __CameraMAC__.replace('-', ':'),
+        'constructor': "elphel",
         'type': "eyesis4pi",
         'model': "eyesis4pi_5hz",
         'modules': 9,
@@ -434,6 +435,7 @@ def main(argv):
 
     # Ask user
     Values[ 'camera' ] = ask('camera', Values[ 'camera' ])
+    Values[ 'constructor' ] = ask('constructor', Values[ 'constructor' ])
     Values[ 'type' ] = ask('type', Values[ 'type' ])
     Values[ 'model' ] = ask('model', Values[ 'model' ])
     Values[ 'modules' ] = ask('modules', Values[ 'modules' ])
@@ -446,6 +448,7 @@ def main(argv):
 
     # Writing values to file
     processData("camera=%s\n" % Values[ 'camera' ], of, __Print__)
+    processData("constructor=%s\n" % Values[ 'constructor' ], of, __Print__)
     processData("type=%s\n" % Values[ 'type' ], of, __Print__)
     processData("model=%s\n" % Values[ 'model' ], of, __Print__)
     processData("modules=%s\n" % Values[ 'modules' ], of, __Print__)
