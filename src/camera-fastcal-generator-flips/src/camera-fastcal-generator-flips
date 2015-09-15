@@ -1,0 +1,418 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+  rawdata-procedures - Camera raw data procedures
+
+  Copyright (c) 2013-2015 FOXEL SA - http://foxel.ch
+  Please read <http://foxel.ch/license> for more information.
+
+
+  Author(s):
+
+       Kevin Velickovic <k.velickovic@foxel.ch>
+
+
+  This file is part of the FOXEL project <http://foxel.ch>.
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU Affero General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU Affero General Public License for more details.
+
+  You should have received a copy of the GNU Affero General Public License
+  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+  Additional Terms:
+
+       You are required to preserve legal notices and author attributions in
+       that material or in the Appropriate Legal Notices displayed by works
+       containing it.
+
+       You are required to attribute the work as explained in the "Usage and
+       Attribution" section of <http://foxel.ch/license>.
+"""
+
+import HTMLParser
+import os
+import re
+import sys
+import time
+import urllib2
+from datetime import datetime
+
+# Function to print debug messages
+def ShowMessage(Message, Type=0, Halt=0, SameLine=0):
+
+    NO_COLORS = 0
+
+    # Flush stderr
+    sys.stderr.flush()
+
+    # Get current date
+    DateNow = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    # Get script name
+    scriptName = "%s :" % os.path.basename(__file__)
+
+    # Return type
+    RetChar = '\n'
+
+    if SameLine:
+        RetChar = '\r'
+
+    if Type == 0:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s INFO] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[32mINFO\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+    elif Type == 1:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s WARNING] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[33mWARNING\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+    elif Type == 2:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s ERROR] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[31mERROR\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+    elif Type == 3:
+        if NO_COLORS:
+            sys.stderr.write("\033[K[%s DEBUG] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+        else:
+            sys.stderr.write("\033[K[%s \033[34mDEBUG\033[39m] %s %s%s" % (DateNow, scriptName, Message, RetChar))
+
+    # Flush stderr
+    sys.stderr.flush()
+
+    # Halt program if requested
+    if Halt:
+        sys.exit()
+
+# Function to get flips of module
+def get_module_flips( module_num ):
+
+    # Loop variables
+    retries_max_url   = 3
+    retries_count_url = 0
+
+    # Output data container
+    output_data = {
+        0: {
+            'v_flip': None,
+            'h_flip': None
+        },
+        1: {
+            'v_flip': None,
+            'h_flip': None
+        },
+        2: {
+            'v_flip': None,
+            'h_flip': None
+        }
+    }
+
+    # Base loop
+    while True:
+
+        # Check if retries exceed limit
+        if retries_count_url >= retries_max_url:
+
+            # Exit loop
+            return
+
+        # Catch errors
+        try:
+
+            # Send querry
+            data = urllib2.urlopen( "http://192.168.0.%d/phpshell.php?command=echo%%20$(cat%%20/etc/autocampars.xml|grep%%20-m%%202%%20-e%%20'MULTI_FLIP[HV]>\"[0-9]')" % module_num, timeout=10)
+
+            # Check if result is valid
+            if not data:
+
+                # Exit function
+                return
+
+            # Iterate over output lines
+            for line_raw in data:
+
+                # HTML decode line
+                h = HTMLParser.HTMLParser()
+                line = h.unescape( line_raw )
+
+                # Extract flips
+                flip_h_exp_data = re.search( r'.*MULTI_FLIPH>\"(\d).*', line )
+                flip_v_exp_data = re.search( r'.*MULTI_FLIPV>\"(\d).*', line )
+
+                # Check if flips are valid
+                if flip_h_exp_data and flip_v_exp_data:
+
+                    # Get flips as integer
+                    flip_h_bin = int( flip_h_exp_data.group( 1 ) )
+                    flip_v_bin = int( flip_v_exp_data.group( 1 ) )
+
+                    # Decompose horizontal flip values of 3 sensors
+                    output_data[ 2 ][ 'h_flip' ] = ( ( flip_h_bin >> 2 ) % 2 )
+                    output_data[ 1 ][ 'h_flip' ] = ( ( flip_h_bin >> 1 ) % 2 )
+                    output_data[ 0 ][ 'h_flip' ] = ( ( flip_h_bin >> 0 ) % 2 )
+
+                    # Decompose vertical flip values of 3 sensors
+                    output_data[ 2 ][ 'v_flip' ] = ( ( flip_v_bin >> 2 ) % 2 )
+                    output_data[ 1 ][ 'v_flip' ] = ( ( flip_v_bin >> 1 ) % 2 )
+                    output_data[ 0 ][ 'v_flip' ] = ( ( flip_v_bin >> 0 ) % 2 )
+
+                    # Return data
+                    return output_data
+
+            # Exit loop
+            break
+
+        except:
+
+            # Debug output
+            ShowMessage("Failed to send querry to module %d, camera offline ? or this machine is not on the 192.168.0/24 subnet ?, retrying... (%d of %d)" % (module_num, retries_count_url + 1, retries_max_url), 1)
+
+            # Increment retries
+            retries_count_url += 1
+
+            # Sleep 5s
+            time.sleep( 5 )
+
+# Function to get mac address from camera
+def get_camera_mac():
+
+    # Loop variables
+    retries_max_url   = 3
+    retries_count_url = 0
+
+    while True:
+
+        # Check if retries exceed limit
+        if retries_count_url >= retries_max_url:
+
+            # Exit loop
+            return
+
+        # Catch errors
+        try:
+
+            # Send querry
+            data = urllib2.urlopen( "http://192.168.0.221/phpshell.php?command=echo%20MacAddr%20$(cat%20/sys/class/net/eth0/address)", timeout=10)
+
+            # Check if mac address is not empty
+            if not data:
+
+                # Exit function
+                return
+
+            # Iterate over output lines
+            for line in data:
+
+                # Extract mac address
+                exp_data = re.search( r'.*MacAddr\s(.*)\<.*', line )
+
+                # Check if mac address is valid
+                if exp_data:
+
+                    # Return mac address
+                    return exp_data.group( 1 ).replace(':', '-').lower()
+
+            # Exit loop
+            break
+
+        except:
+
+            # Debug output
+            ShowMessage("Failed to send querry, camera offline ? or this machine is not on the 192.168.0/24 subnet ?, retrying... (%d of %d)" % (retries_count_url + 1, retries_max_url), 1)
+
+            # Increment retries
+            retries_count_url += 1
+
+            # Sleep 5s
+            time.sleep( 5 )
+
+# Usage display function
+def _usage():
+    print """
+    Usage: %s [OPTIONS]
+
+    [Required arguments]
+    --mount-point            Base mount directory
+
+    [Optional arguments]
+    --print                  Print values (Don't write FastCal file)
+    --help                   Show this message
+
+    """ % os.path.basename( sys.argv[0] )
+
+# Program entry point function
+def main(argv):
+
+    # Parse arguments
+    Arguments = {}
+    Argv_Concat = ' '.join(argv)
+    Argv_Flags = Argv_Concat.split('--')
+
+    # Iterate over source args
+    for i in Argv_Flags:
+
+        # Check length
+        if len(i) > 0:
+
+            # Split by first space
+            splited = i.split(' ', 1)
+
+            # Check if argument contains value
+            if len(splited) > 1:
+                Arguments[splited[0]] = (None if not splited[1] else splited[1].strip())
+            else:
+                Arguments[splited[0]] =  None
+
+    # Arguments variables
+    __MountPoint__        = (None if not 'mount-point' in Arguments else Arguments['mount-point'].rstrip('/'))
+    __Print__             = (1 if 'print' in Arguments else 0)
+    __Help__              = (1 if 'help' in Arguments else 0)
+
+    # Arguments check
+    if (not __MountPoint__) or __Help__:
+        _usage()
+        sys.exit(0)
+
+    # Debug output
+    ShowMessage("Asking camera for MAC address...")
+
+    # Get camera mac address
+    __CameraMAC__ = get_camera_mac()
+
+    # Check if camera mac is valid
+    if not __CameraMAC__:
+
+        # Debug output
+        ShowMessage("Failed to get camera MAC address", 2)
+
+        # Exit with code 1 ( failure )
+        sys.exit( 1 )
+
+    else:
+
+        # Debug output
+        ShowMessage("Camera MAC is %s" % __CameraMAC__)
+
+    # Compute paths
+    fastcalFilePath = "%s/camera/%s/fastcal/calibration.key" % ( __MountPoint__, __CameraMAC__ )
+    fastcalFile_fp = None
+
+    # Debug output
+    ShowMessage("Output file %s" % fastcalFilePath)
+
+    # Check print parameter presence
+    if not __Print__:
+
+        # Check if output dir exists
+        if os.path.isfile( fastcalFilePath ):
+
+            # Open file
+            with open( fastcalFilePath, "r" ) as f:
+
+                # Iterate over lines
+                for line in f:
+
+                    # Check for flips values presence
+                    if line.find( "vflip" ) != -1:
+
+                        # Debug output
+                        ShowMessage("Flips already generated, skipping...")
+
+                        # Exit with code 1 ( failure )
+                        sys.exit( 1 )
+        else:
+
+            # Debug output
+            ShowMessage("FastCal file not found", 2)
+
+            # Exit with code 1 ( failure )
+            sys.exit( 1 )
+
+
+    # Output container
+    output_lines = []
+
+    # Iterate over possible modules
+    for mod_num in range( 221, 230 ):
+
+        # Extract index
+        mod_index = ( ( mod_num - 220 ) - 1 )
+
+        # Debug output
+        ShowMessage( "Querying module %d..." % ( mod_index + 1 ), 0, 0, 1 )
+
+        # Ask camera for flips
+        mod_flips = get_module_flips( mod_num )
+
+        # Check if flips are valid
+        if not mod_flips:
+
+            # Debug output
+            ShowMessage("Failed to get camera %d modules flips" % mod_num, 2)
+
+            # Exit with code 1 ( failure )
+            sys.exit( 1 )
+
+        # Check if not the last module (9)
+        if mod_index < 8:
+
+            # Append vertical flips data
+            output_lines.append( "vflip_%02d=%d" % ( mod_index, mod_flips[ 0 ][ 'v_flip' ] ) )
+            output_lines.append( "vflip_%02d=%d" % ( mod_index + 8, mod_flips[ 1 ][ 'v_flip' ] ) )
+            output_lines.append( "vflip_%02d=%d" % ( mod_index + 16, mod_flips[ 2 ][ 'v_flip' ] ) )
+
+            # Append horizontal flips data
+            output_lines.append( "hflip_%02d=%d" % ( mod_index, mod_flips[ 0 ][ 'h_flip' ] ) )
+            output_lines.append( "hflip_%02d=%d" % ( mod_index + 8, mod_flips[ 1 ][ 'h_flip' ] ) )
+            output_lines.append( "hflip_%02d=%d" % ( mod_index + 16, mod_flips[ 2 ][ 'h_flip' ] ) )
+
+        else:
+
+            # Append vertical flips data
+            output_lines.append( "vflip_%02d=%d" % ( mod_index + 16, mod_flips[ 0 ][ 'v_flip' ] ) )
+            output_lines.append( "vflip_%02d=%d" % ( mod_index + 17, mod_flips[ 1 ][ 'v_flip' ] ) )
+
+            # Append horizontal flips data
+            output_lines.append( "hflip_%02d=%d" % ( mod_index + 16, mod_flips[ 0 ][ 'h_flip' ] ) )
+            output_lines.append( "hflip_%02d=%d" % ( mod_index + 17, mod_flips[ 1 ][ 'h_flip' ] ) )
+
+    # Sort results
+    output_lines = sorted( output_lines )
+
+    # Check if print requested
+    if __Print__:
+
+        # Iterate over values
+        for e in output_lines:
+
+            # Display value
+            print( e )
+
+    else:
+
+        # Open output file
+        with open( fastcalFilePath, "a" ) as output_file:
+
+            # Iterate over values
+            for line in output_lines:
+
+                # Write value
+                output_file.write( "%s\n" % line )
+
+    # Debug output
+    ShowMessage("Done")
+
+# Program entry point
+if __name__ == "__main__":
+    main(sys.argv[1:])
