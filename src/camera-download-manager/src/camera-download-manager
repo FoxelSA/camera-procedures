@@ -50,12 +50,13 @@ import exifread
 """
 
 # Config
-CONFIG_SOURCE_DIR    = "/data/footage"
-CONFIG_DOWNLOAD_DIR  = "/data/download"
-CONFIG_BACKUP_DIR    = "/data/backup"
-CONFIG_DEST_SSH_HOST = "foxel@192.168.0.69"
-CONFIG_SELF_SSH_HOST = "foxel@192.168.0.50"
-CONFIG_MOUNTPOINT    = "/foxel/mnt/zfs/data/cleanned_structure"
+CONFIG_SOURCE_DIR      = "/data/footage"
+CONFIG_DOWNLOAD_DIR    = "/data/download"
+CONFIG_BACKUP_DIR      = "/data/backup"
+CONFIG_BACKUP_FAIL_DIR = "/data/backup_fail"
+CONFIG_DEST_SSH_HOST   = "foxel@192.168.0.69"
+CONFIG_SELF_SSH_HOST   = "foxel@192.168.0.50"
+CONFIG_MOUNTPOINT      = "/foxel/mnt/zfs/data/test_structure"
 
 # Function to print debug messages
 def ShowMessage(Message, Type=0, Halt=0):
@@ -256,6 +257,12 @@ def download_snapshots():
 
             # Debug output
             ShowMessage("Module 1 missing in pose %s" % first_module.timestamp_full, 2)
+
+            # Iterate over poses
+            for p in poses:
+
+                # Move pose to backup_fail folder
+                os.system( "mv %s %s/" % ( p.path, CONFIG_BACKUP_FAIL_DIR ) )
 
         else:
 

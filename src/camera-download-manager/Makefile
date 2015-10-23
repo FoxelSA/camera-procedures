@@ -4,7 +4,7 @@
 #
 
     all:directories
-	cp src/download-manager bin/download-manager
+	cp src/camera-download-manager bin/camera-download-manager
 
 #
 #   make - directories
