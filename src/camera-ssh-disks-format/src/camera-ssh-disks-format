@@ -1,0 +1,93 @@
+#!/bin/bash
+# camera-procedures - scripts suite dedicated to camera preparation.
+#
+# Copyright (c) 2013-2015 FOXEL SA - http://foxel.ch
+# Please read <http://foxel.ch/license> for more information.
+#
+#
+# Author(s):
+#
+#       Kevin Velickovic <k.velickovic@foxel.ch>
+#
+#
+# This file is part of the FOXEL project <http://foxel.ch>.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more details.
+#
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+#
+# Additional Terms:
+#
+#       You are required to preserve legal notices and author attributions in
+#       that material or in the Appropriate Legal Notices displayed by works
+#       containing it.
+#
+#       You are required to attribute the work as explained in the "Usage and
+#       Attribution" section of <http://foxel.ch/license>.
+
+# Local variables #
+ERROR_OCCURED=0
+
+# Debug output #
+echo "Unmounting disks..."
+
+# Unmounting modules
+camera-ssh-disks-umount
+
+# Check unmount status
+if [ $? -eq 0 ]; then
+
+    # Debug output #
+    echo "Formatting disks..."
+
+    # Loop over possible modules #
+    for module in $( seq 221 229 ); do
+
+        # Debug output #
+        echo "Formatting /dev/hda1 on module $module..."
+
+        # Format disk #
+        ssh root@192.168.0.$module /sbin/mkfs.ext2 -q -m0 -T largefile4 /dev/hda1
+
+        # Check for errors #
+        if [ $? -ne 0 ]; then
+
+            # Set error flag #
+            ERROR_OCCURED=1
+
+        fi
+
+    done
+
+else
+
+    # Set error flag #
+    ERROR_OCCURED=1
+
+fi
+
+# Check for errors #
+if [ $ERROR_OCCURED -ne 0 ]; then
+
+    # Debug output #
+    echo -e "\e[31mErrors occured !\e[39m"
+
+else
+
+    # Debug output #
+    echo -e "\e[32mDone\e[39m"
+
+fi
+
+# Exit program #
+exit $ERROR_OCCURED
